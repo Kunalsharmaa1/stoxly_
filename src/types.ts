@@ -1,0 +1,11 @@
+export type Screen =
+  | 'login'
+  | 'dashboard'
+  | 'stock'
+  | 'ai'
+  | 'watchlist'
+  | 'strategy'
+  | 'backtest'
+  | 'history'
+  | 'portfolio'
+  | 'settings'
