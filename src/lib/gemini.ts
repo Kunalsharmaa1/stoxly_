@@ -1,6 +1,6 @@
 import { INDICATORS, OPERATORS, normalizeIndicatorConfig, validateConditions, type IndicatorConfig, type StrategyCondition } from "@/lib/backtest/indicators";
 
-const GEMINI_MODEL = "gemini-3.1-flash-lite";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export type StrategyDraft = {
@@ -72,7 +72,7 @@ export async function generateStrategy(prompt: string, selectedSymbol: string): 
     body: JSON.stringify({
       system_instruction: { parts: [{ text: systemInstructions }] },
       contents: [{ role: "user", parts: [{ text: `Selected instrument: ${selectedSymbol}\nStrategy request: ${prompt}` }] }],
-      generationConfig: { responseMimeType: "application/json", responseSchema, temperature: 0.1 },
+      generationConfig: { responseMimeType: "application/json", responseSchema },
     }),
   });
 

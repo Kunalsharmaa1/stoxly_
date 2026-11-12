@@ -1,184 +1,161 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { ANALYSIS_HORIZONS, type AnalysisHorizon, type HorizonAnalysis, type MarketAnalysis } from '@/lib/market-analysis'
 
-const outcomeData = [
-  { period: '1D', positive: 62, negative: 38 },
-  { period: '3D', positive: 68, negative: 32 },
-  { period: '5D', positive: 76, negative: 24 },
-  { period: '10D', positive: 71, negative: 29 },
-  { period: '20D', positive: 65, negative: 35 },
-]
-
-const featureImportance = [
-  { feature: 'RSI Pattern', value: 0.28 },
-  { feature: 'EMA Distance', value: 0.22 },
-  { feature: 'Volume Ratio', value: 0.19 },
-  { feature: 'MACD Signal', value: 0.16 },
-  { feature: 'Momentum', value: 0.09 },
-  { feature: 'Volatility', value: 0.06 },
-]
-
-const historicalCases = [
-  { date: 'Mar 2024', outcome: '+3.1%', positive: true, sim: 94 },
-  { date: 'Oct 2023', outcome: '+1.8%', positive: true, sim: 91 },
-  { date: 'Jan 2024', outcome: '+4.2%', positive: true, sim: 88 },
-  { date: 'Jun 2023', outcome: '-1.4%', positive: false, sim: 85 },
-  { date: 'Aug 2023', outcome: '+2.9%', positive: true, sim: 83 },
-  { date: 'Apr 2023', outcome: '+0.6%', positive: true, sim: 81 },
-]
+const symbols = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'SBIN', 'HAL', 'WIPRO', 'ICICIBANK', 'NIFTY50', 'SENSEX', 'BANKNIFTY']
+const formatPct = (value: number | null, digits = 1) => value === null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(digits)}%`
+const formatDate = (value: string) => new Date(`${value}T12:00:00+05:30`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+const formatUpdated = (value: string) => new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })
 
 export default function AIIntelligence() {
+  const [symbol, setSymbol] = useState('RELIANCE')
+  const [horizon, setHorizon] = useState<AnalysisHorizon>(5)
+  const [analysis, setAnalysis] = useState<MarketAnalysis | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setLoading(true)
+      setError('')
+      setAnalysis(null)
+      try {
+        const response = await fetch('/api/ai/market-analysis', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Could not load historical market data.')
+        if (!cancelled) { setAnalysis(result.analysis); setLastUpdatedAt(result.lastUpdatedAt) }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load historical market data.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [symbol, reloadKey])
+
+  const selected: HorizonAnalysis | undefined = analysis?.horizons[horizon]
+  const chartData = ANALYSIS_HORIZONS.map(value => ({
+    horizon: `${value}D`, positive: analysis?.horizons[value].positiveOutcomePct,
+    matches: analysis?.horizons[value].validMatchCount || 0,
+  }))
+  const summaryCards = [
+    { label: `Historical positive outcomes · ${horizon} sessions`, value: selected?.positiveOutcomePct === null || selected?.positiveOutcomePct === undefined ? '—' : `${selected.positiveOutcomePct.toFixed(1)}%`, sub: selected ? `${selected.validMatchCount} non-overlapping matches · not a forecast` : 'No calculated sample yet', color: 'var(--ai)' },
+    { label: 'Average forward return', value: formatPct(selected?.averageReturn ?? null), sub: selected ? `Median ${formatPct(selected.medianReturn)}` : 'Calculated from matched dates', color: 'var(--green)' },
+    { label: 'Valid historical matches', value: selected ? String(selected.validMatchCount) : '—', sub: selected ? `${selected.candidateCount} eligible historical setups` : 'After data and similarity filters', color: 'var(--text-primary)' },
+    { label: 'Closest setup similarity', value: selected?.matches[0] ? `${selected.matches[0].similarity.toFixed(1)}%` : '—', sub: selected?.matches[0] ? formatDate(selected.matches[0].date) : 'No qualifying matches', color: 'var(--ai-purple)' },
+  ]
+
   return (
-    <div style={{ padding: 24, maxWidth: 1200, display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Header */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 16, color: 'var(--ai)' }}>✦</span>
-          <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em' }}>AI Intelligence</h1>
-          <span style={{ fontSize: 10, background: 'var(--ai-muted)', color: 'var(--ai)', border: '1px solid rgba(129,140,248,0.2)', padding: '2px 8px', borderRadius: 3, fontWeight: 700 }}>RELIANCE</span>
+    <div style={{ padding: 24, maxWidth: 1250, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 16, color: 'var(--ai)' }}>✦</span>
+            <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em' }}>Historical Market Analysis</h1>
+            <span style={{ fontSize: 10, background: 'var(--ai-muted)', color: 'var(--ai)', border: '1px solid rgba(129,140,248,0.2)', padding: '2px 8px', borderRadius: 3, fontWeight: 700 }}>{symbol}</span>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Deterministic indicator-pattern comparison from completed Upstox daily candles.</p>
         </div>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Machine-learning analysis based on historical market patterns · Updated 14:32 IST</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)' }}>Instrument<select aria-label="Select stock or index" value={symbol} onChange={e => setSymbol(e.target.value)} style={{ display: 'block', minWidth: 150, marginTop: 4 }}>{symbols.map(item => <option key={item}>{item}</option>)}</select></label>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)' }}>Forward horizon<select aria-label="Select analysis horizon" value={horizon} onChange={e => setHorizon(Number(e.target.value) as AnalysisHorizon)} style={{ display: 'block', minWidth: 125, marginTop: 4 }}>{ANALYSIS_HORIZONS.map(item => <option key={item} value={item}>{item} trading sessions</option>)}</select></label>
+        </div>
       </div>
 
-      {/* Top AI summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        {[
-          { label: '5-Day Positive Return Probability', value: '76%', sub: 'Based on 42 similar setups', accent: 'var(--ai)', bg: 'var(--ai-muted)' },
-          { label: 'Historical Pattern Similarity', value: '87%', sub: 'Nearest match: Mar 2024', accent: 'var(--ai-purple)', bg: 'rgba(167,139,250,0.1)' },
-          { label: 'Expected Historical Return', value: '+2.4%', sub: 'Median of positive outcomes', accent: 'var(--green)', bg: 'var(--green-muted)' },
-          { label: 'Model Confidence', value: 'High', sub: 'Random Forest · XGBoost', accent: 'var(--text-secondary)', bg: 'rgba(90,98,112,0.08)' },
-        ].map(m => (
-          <div key={m.label} className="card" style={{ padding: 16, borderColor: m.accent === 'var(--ai)' ? 'rgba(129,140,248,0.25)' : 'var(--border)' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>{m.label}</div>
-            <div className="mono" style={{ fontSize: 28, fontWeight: 700, color: m.accent, lineHeight: 1.1, marginBottom: 4 }}>{m.value}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
+      {loading && <div className="card" role="status" style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>Fetching completed historical candles and calculating indicator matches for {symbol}…</div>}
+      {!loading && error && <div className="card" role="alert" style={{ padding: 18, borderColor: 'rgba(239,68,68,0.3)' }}><div style={{ fontWeight: 700, color: 'var(--red)', marginBottom: 5 }}>Historical analysis unavailable</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{error}</div><button className="btn-ghost" onClick={() => setReloadKey(value => value + 1)} style={{ marginTop: 10, fontSize: 12 }}>Retry</button></div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* Historical Pattern Analysis */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-            <div>
-              <div className="section-title">Historical Pattern Analysis</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Similar historical setups found in past data</div>
-            </div>
-          </div>
-
-          {/* Stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
-            {[
-              { label: 'Similar Cases', value: '42', color: 'var(--text-primary)' },
-              { label: 'Positive', value: '31', color: 'var(--green)' },
-              { label: 'Negative', value: '11', color: 'var(--red)' },
-            ].map(s => (
-              <div key={s.label} style={{ textAlign: 'center', background: 'var(--bg-surface)', borderRadius: 5, padding: '10px 8px' }}>
-                <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Outcome distribution chart */}
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Outcome Distribution by Horizon</div>
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={outcomeData} barSize={20} barGap={2}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="period" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
-              <YAxis hide domain={[0, 100]} />
-              <Tooltip
-                contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
-                formatter={(v: any, name: any) => [`${v}%`, name === 'positive' ? 'Positive' : 'Negative']}
-              />
-              <Bar dataKey="positive" stackId="a" fill="rgba(34,197,94,0.6)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="negative" stackId="a" fill="rgba(239,68,68,0.4)" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-
-          {/* Historical cases */}
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Most Similar Historical Cases</div>
-            {historicalCases.map(c => (
-              <div key={c.date} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBlock: 5, borderBottom: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 56 }}>{c.date}</span>
-                <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ width: `${c.sim}%`, height: '100%', background: 'var(--ai)', borderRadius: 2 }} />
-                </div>
-                <span className="mono" style={{ fontSize: 11, width: 30, textAlign: 'right', color: 'var(--text-muted)' }}>{c.sim}%</span>
-                <span className="mono" style={{ fontSize: 11, width: 44, textAlign: 'right', fontWeight: 600, color: c.positive ? 'var(--green)' : 'var(--red)' }}>{c.outcome}</span>
-              </div>
-            ))}
-          </div>
+      {!loading && !error && analysis && <>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          Data period: <span className="mono">{formatDate(analysis.dataPeriod.from)} – {formatDate(analysis.dataPeriod.to)}</span> · {analysis.candleCount.toLocaleString()} completed candles · As of {formatDate(analysis.asOfDate)} · Updated {formatUpdated(lastUpdatedAt)}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Feature Importance */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {summaryCards.map(card => <div key={card.label} className="card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>{card.label}</div>
+            <div className="mono" style={{ fontSize: 25, fontWeight: 700, color: card.color, lineHeight: 1.1, marginBottom: 5 }}>{card.value}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{card.sub}</div>
+          </div>)}
+        </div>
+
+        {selected?.validMatchCount === 0 && <div className="card" style={{ padding: 13, color: 'var(--yellow)', fontSize: 12, borderColor: 'rgba(245,158,11,0.25)' }}>No historical setups met the {analysis.method.minimumSimilarityPct}% similarity threshold with enough completed future candles for this horizon.</div>}
+        {!!selected && selected.validMatchCount > 0 && selected.validMatchCount < 5 && <div className="card" style={{ padding: 13, color: 'var(--yellow)', fontSize: 12, borderColor: 'rgba(245,158,11,0.25)' }}>Small historical sample: only {selected.validMatchCount} qualifying setups. This percentage is descriptive of those dates, not a guaranteed probability.</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: 18, alignItems: 'start' }}>
           <div className="card" style={{ padding: 16 }}>
-            <div className="section-title" style={{ marginBottom: 4 }}>Feature Importance</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>Contribution of each factor to the model's prediction</div>
-            {featureImportance.map((f, i) => (
-              <div key={f.feature} style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{f.feature}</span>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--ai)' }}>{(f.value * 100).toFixed(0)}%</span>
-                </div>
-                <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${f.value * 100}%`, height: '100%', borderRadius: 3,
-                    background: `rgba(129,140,248,${0.9 - i * 0.1})`,
-                  }} />
-                </div>
-              </div>
-            ))}
-          </div>
+            <div className="section-title" style={{ marginBottom: 3 }}>Historical Forward Outcomes</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>Positive close-to-close returns among independently spaced matches at each horizon.</div>
+            <ResponsiveContainer width="100%" height={205}>
+              <BarChart data={chartData} barSize={28}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="horizon" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
+                <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} formatter={(value: any, _name: any, item: any) => [value === null ? 'Insufficient matches' : `${Number(value).toFixed(1)}% (${item.payload.matches} matches)`, 'Positive historical outcomes']} />
+                <Bar dataKey="positive" radius={[3, 3, 0, 0]}>
+                  {chartData.map(item => <Cell key={item.horizon} fill="rgba(34,197,94,0.65)" />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
 
-          {/* Explainable AI */}
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-              <span style={{ color: 'var(--ai)', fontSize: 13 }}>✦</span>
-              <span className="section-title">Why does the model see this setup?</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7, marginTop: 6 }}>
+              {[
+                ['Average return', formatPct(selected?.averageReturn ?? null)], ['Median return', formatPct(selected?.medianReturn ?? null)],
+                ['Maximum favourable excursion', formatPct(selected?.maximumFavourableExcursion ?? null)], ['Maximum adverse excursion', formatPct(selected?.maximumAdverseExcursion ?? null)],
+              ].map(([label, value]) => <div key={label} style={{ padding: '9px 8px', background: 'var(--bg-surface)', borderRadius: 4 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div><div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
+              </div>)}
             </div>
-            {[
-              { text: 'Price above EMA20 — momentum positive', ok: true },
-              { text: 'RSI (58) in neutral-bullish zone, not overbought', ok: true },
-              { text: 'Relative volume 1.4× above 20-day average', ok: true },
-              { text: 'MACD signal line crossover — 3 sessions ago', ok: true },
-              { text: 'RSI structure resembles historical positive setups', ok: true },
-              { text: 'Broader NIFTY 50 trend supportive (+0.62% today)', ok: true },
-            ].map((item, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 7 }}>
-                <span style={{ color: item.ok ? 'var(--green)' : 'var(--red)', fontSize: 12, marginTop: 1, flexShrink: 0 }}>{item.ok ? '✓' : '✗'}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{item.text}</span>
-              </div>
-            ))}
           </div>
 
-          {/* Model info */}
-          <div className="card" style={{ padding: 14, background: 'var(--bg-surface)' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>Model Information</div>
-            {[
-              ['Algorithm', 'Random Forest + XGBoost Ensemble'],
-              ['Training Period', 'Jan 2010 – Dec 2022'],
-              ['Validation Period', 'Jan 2023 – Jun 2024'],
-              ['Test Period', 'Jul 2024 – Present'],
-              ['Features', '47 technical indicators'],
-              ['Accuracy (Test)', '68.4%'],
-            ].map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', paddingBlock: 5, borderBottom: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{k}</span>
-                <span className="mono" style={{ fontSize: 11 }}>{v}</span>
-              </div>
-            ))}
-            <div style={{ marginTop: 12, padding: '8px 10px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 4 }}>
-              <div style={{ fontSize: 10, color: 'var(--yellow)', lineHeight: 1.5 }}>
-                ⚠ AI outputs are statistical estimates based on historical data and are not guaranteed predictions. Do not rely solely on AI outputs for trading decisions.
-              </div>
+          <div className="card" style={{ padding: 16 }}>
+            <div className="section-title" style={{ marginBottom: 3 }}>Closest Historical Setups</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>Showing up to 10 closest dates; aggregate statistics use all {selected?.validMatchCount || 0} qualifying non-overlapping matches.</div>
+            {!selected?.matches.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '18px 0' }}>No qualifying matching dates for this horizon.</div> : <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', minWidth: 480 }}>
+                <thead><tr><th>Date</th><th>Similarity</th><th>Return</th><th>MFE</th><th>MAE</th></tr></thead>
+                <tbody>{selected.matches.map(match => <tr key={match.date}>
+                  <td className="mono" style={{ fontSize: 10 }}>{formatDate(match.date)}</td>
+                  <td className="mono" style={{ fontSize: 10 }}>{match.similarity.toFixed(1)}%</td>
+                  <td className="mono" style={{ fontSize: 10, color: match.forwardReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>{formatPct(match.forwardReturn)}</td>
+                  <td className="mono" style={{ fontSize: 10, color: 'var(--green)' }}>{formatPct(match.favourableExcursion)}</td>
+                  <td className="mono" style={{ fontSize: 10, color: 'var(--red)' }}>{formatPct(match.adverseExcursion)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>}
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>Forward return uses the close {horizon} sessions after each setup. MFE/MAE use the highest high and lowest low during those future sessions.</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+          <div className="card" style={{ padding: 16 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>Similarity Method</div>
+            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+              <li>Each completed candle is represented by {analysis.featureCount} current-and-past-only features: {analysis.featureNames.join(', ')}.</li>
+              <li>Features are scaled by 1.4826 × historical median absolute deviation; standard deviation is the fallback when MAD is zero.</li>
+              <li>Distance is the root mean square of the scaled feature differences. Similarity = 100 × exp(−distance / 2); only scores of at least {analysis.method.minimumSimilarityPct}% qualify.</li>
+              <li>Eligible historical setups must have all {horizon} future candles. Greedy closest-first selection spaces retained setup dates by at least {horizon} sessions.</li>
+            </ol>
+            <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 9 }}>Non-overlap reduces duplicate forward windows; it does not make market regimes statistically independent. No feature-importance or trained-model claims are made.</p>
+          </div>
+          <div className="card" style={{ padding: 16 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>Data and Interpretation</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+              The current-day candle is excluded. Historical setup outcomes stop before the current completed candle, and any setup without the full selected future horizon is excluded. A positive historical outcome percentage describes this matched sample only; it is not a forecast or guaranteed probability.
+            </div>
+            <div style={{ marginTop: 10, padding: 9, background: 'var(--bg-surface)', borderRadius: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+              Data interval: daily OHLCV · VWAP is anchored to the first candle in the fetched five-year range · Feature set: {analysis.featureCount} indicators/derived values · {selected?.validMatchCount || 0} valid matches for {horizon} sessions.
             </div>
           </div>
         </div>
-      </div>
+      </>}
     </div>
   )
 }
