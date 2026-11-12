@@ -103,7 +103,7 @@ export default function BacktestResults({ onNavigate }: Props) {
       <div style={{ padding: 60, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Executing Backtest Strategy over Upstox Candles...</div>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 500, lineHeight: 1.5 }}>
-          Calculating indicators (RSI, EMA 20, SMA 50), trade signals, stop-loss triggers, position sizing, and equity curve...
+          Calculating the configured indicator series and trade signals, then applying the existing stop-loss, position-sizing, and equity-curve logic...
         </p>
       </div>
     )

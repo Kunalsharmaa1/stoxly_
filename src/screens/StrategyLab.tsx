@@ -2,31 +2,59 @@
 
 import { useState } from 'react'
 import type { Screen } from '@/types'
+import { getDefaultIndicatorConfig, getIndicatorOutputs, INDICATORS, normalizeIndicatorConfig, type IndicatorConfig, type StrategyCondition } from '@/lib/backtest/indicators'
 
-type Condition = { indicator: string; operator: string; value: string }
+type Condition = StrategyCondition
 
 interface Props { onNavigate: (s: Screen) => void }
 
-const indicators = ['RSI', 'Price', 'MACD', 'EMA 20', 'SMA 50', 'Volume', 'ATR']
 const operators = ['<', '>', '<=', '>=', '=', 'crosses above', 'crosses below']
+
+function safeConfig(config: IndicatorConfig): IndicatorConfig {
+  try { return normalizeIndicatorConfig(config) } catch { return getDefaultIndicatorConfig('RSI') }
+}
+function describeConfig(config: IndicatorConfig): string {
+  const normalized = safeConfig(config)
+  const params = Object.entries(normalized.params || {}).map(([key, value]) => `${key}=${value}`).join(', ')
+  return `${normalized.indicator}${normalized.output && normalized.output !== 'Value' ? ` ${normalized.output}` : ''}${params ? ` (${params})` : ''}`
+}
 
 const ConditionRow = ({ cond, onChange, onRemove, join }: {
   cond: Condition; onChange: (c: Condition) => void; onRemove: () => void; join?: string
 }) => {
   if (!cond) return null
+  const left = safeConfig(cond)
+  const legacyRight = /^(Price|EMA\s+\d+|SMA\s+\d+)$/i.test(cond.value)
+  const right = cond.valueIndicator ? safeConfig(cond.valueIndicator) : legacyRight ? safeConfig({ indicator: cond.value }) : null
+  const updateLeft = (config: IndicatorConfig) => onChange({ ...cond, ...config, indicator: config.indicator })
+  const updateRight = (config: IndicatorConfig) => onChange({ ...cond, value: '', valueIndicator: config })
+  const renderConfig = (config: IndicatorConfig, update: (next: IndicatorConfig) => void, label: string) => {
+    const normalized = safeConfig(config)
+    const id = normalized.indicator as string
+    return <>
+      <select aria-label={`${label} indicator`} value={id} onChange={e => update(getDefaultIndicatorConfig(e.target.value))} style={{ flex: '1 1 130px' }}>
+        {INDICATORS.map(indicator => <option key={indicator}>{indicator}</option>)}
+      </select>
+      {getIndicatorOutputs(id).length > 1 && <select aria-label={`${label} output line`} value={normalized.output} onChange={e => update({ ...normalized, output: e.target.value })} style={{ flex: '1 1 110px' }}>
+        {getIndicatorOutputs(id).map(output => <option key={output}>{output}</option>)}
+      </select>}
+      {Object.entries(normalized.params || {}).map(([key, value]) => <label key={key} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>{key}<input aria-label={`${label} ${key}`} type="number" min="0.001" max="500" value={value} onChange={e => update({ ...normalized, params: { ...normalized.params, [key]: Number(e.target.value) } })} style={{ width: 66 }} /></label>)}
+    </>
+  }
   return (
     <div>
       {join && (
         <div style={{ padding: '4px 0 4px 4px', fontSize: 10, fontWeight: 700, color: 'var(--ai)', letterSpacing: '0.08em' }}>{join}</div>
       )}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <select value={cond.indicator || 'RSI'} onChange={e => onChange({ ...cond, indicator: e.target.value })} style={{ flex: '0 0 110px' }}>
-          {indicators.map(i => <option key={i}>{i}</option>)}
-        </select>
-        <select value={cond.operator || '<'} onChange={e => onChange({ ...cond, operator: e.target.value })} style={{ flex: '0 0 120px' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        {renderConfig(left, updateLeft, 'Condition')}
+        <select value={cond.operator || '<'} onChange={e => onChange({ ...cond, operator: e.target.value })} style={{ flex: '0 0 130px' }}>
           {operators.map(o => <option key={o}>{o}</option>)}
         </select>
-        <input value={cond.value || ''} onChange={e => onChange({ ...cond, value: e.target.value })} style={{ flex: 1 }} />
+        <select aria-label="Comparison value type" value={right ? 'indicator' : 'number'} onChange={e => e.target.value === 'indicator' ? updateRight(getDefaultIndicatorConfig('EMA')) : onChange({ ...cond, valueIndicator: undefined, value: cond.value && !/^(Price|EMA\s+\d+|SMA\s+\d+)$/i.test(cond.value) ? cond.value : '0' })} style={{ flex: '0 0 95px' }}>
+          <option value="number">Number</option><option value="indicator">Indicator</option>
+        </select>
+        {right ? renderConfig(right, updateRight, 'Comparison') : <input aria-label="Comparison number" type="number" value={cond.value || ''} onChange={e => onChange({ ...cond, value: e.target.value })} style={{ flex: '1 1 90px' }} />}
         <button onClick={onRemove} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>×</button>
       </div>
     </div>
@@ -45,6 +73,11 @@ export default function StrategyLab({ onNavigate }: Props) {
   const [posSize, setPosSize] = useState('100')
   const [joinType, setJoinType] = useState<'AND' | 'OR'>('AND')
   const [exitJoin, setExitJoin] = useState<'AND' | 'OR'>('OR')
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiMessage, setAiMessage] = useState('')
+  const [aiError, setAiError] = useState('')
+  const [needsAiConfirmation, setNeedsAiConfirmation] = useState(false)
 
   const [entry, setEntry] = useState<Condition[]>([
     { indicator: 'Price', operator: 'crosses above', value: 'EMA 20' },
@@ -57,6 +90,37 @@ export default function StrategyLab({ onNavigate }: Props) {
 
   const addEntry = () => setEntry(p => [...p, { indicator: 'RSI', operator: '<', value: '50' }])
   const addExit = () => setExit(p => [...p, { indicator: 'RSI', operator: '>', value: '60' }])
+
+  const handleGenerateStrategy = async () => {
+    setAiBusy(true)
+    setAiError('')
+    setAiMessage('')
+    try {
+      const response = await fetch('/api/ai/strategy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: aiPrompt, selectedSymbol: stock }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not generate strategy rules.')
+      const strategy = result.strategy
+      if (strategy.status === 'clarification') {
+        setAiMessage(strategy.clarification)
+        return
+      }
+      setName(strategy.name)
+      setStock(strategy.symbol)
+      setJoinType(strategy.joinType)
+      setExitJoin(strategy.exitJoin)
+      setEntry(strategy.entryConditions)
+      setExit(strategy.exitConditions)
+      setNeedsAiConfirmation(true)
+      setAiMessage('Rules added below. Review and edit them, then confirm before running the backtest.')
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Could not generate strategy rules.')
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   const handleRunBacktest = () => {
     const config = {
@@ -87,6 +151,18 @@ export default function StrategyLab({ onNavigate }: Props) {
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Build, test, and analyze your trading strategies</p>
       </div>
 
+      <section className="card" style={{ padding: 16, borderColor: 'rgba(139,92,246,0.35)' }}>
+        <div className="section-title" style={{ marginBottom: 6 }}>AI Strategy Assistant</div>
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Describe entry and exit rules in plain language. Gemini translates conditions across the supported technical indicators; it does not calculate or invent performance results.</p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+          <textarea aria-label="Describe your strategy" value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} maxLength={2000} placeholder="Example: Buy RELIANCE when price crosses above EMA 20 and RSI is above 50. Exit when RSI crosses below 50." rows={3} style={{ flex: 1, resize: 'vertical', font: 'inherit', fontSize: 12, padding: 10, color: 'var(--text-primary)', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 4 }} />
+          <button className="btn-primary" disabled={aiBusy || !aiPrompt.trim()} onClick={handleGenerateStrategy} style={{ alignSelf: 'flex-start', padding: '9px 14px', opacity: aiBusy || !aiPrompt.trim() ? 0.6 : 1 }}>{aiBusy ? 'Generating…' : 'Generate Rules'}</button>
+        </div>
+        {aiError && <p role="alert" style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{aiError}</p>}
+        {aiMessage && <p role="status" style={{ color: aiError ? 'var(--red)' : 'var(--ai)', fontSize: 12, marginTop: 8 }}>{aiMessage}</p>}
+        {needsAiConfirmation && <button className="btn-ghost" onClick={() => setNeedsAiConfirmation(false)} style={{ marginTop: 8, fontSize: 12, color: 'var(--green)' }}>Confirm reviewed rules</button>}
+      </section>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 20, alignItems: 'start' }}>
         {/* Builder */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -101,7 +177,7 @@ export default function StrategyLab({ onNavigate }: Props) {
               <div>
                 <div className="label" style={{ marginBottom: 5 }}>Stock / Instrument</div>
                 <select value={stock} onChange={e => setStock(e.target.value)} style={{ width: '100%' }}>
-                  {['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'SBIN', 'HAL', 'WIPRO', 'NIFTY50'].map(s => <option key={s}>{s}</option>)}
+                  {['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'SBIN', 'HAL', 'WIPRO', 'ICICIBANK', 'NIFTY50', 'SENSEX', 'BANKNIFTY'].map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
               <div>
@@ -215,8 +291,8 @@ export default function StrategyLab({ onNavigate }: Props) {
             </div>
           </div>
 
-          <button className="btn-primary" style={{ padding: '10px 24px', fontSize: 14, alignSelf: 'flex-start' }} onClick={handleRunBacktest}>
-            ▶ Run Backtest
+          <button className="btn-primary" disabled={needsAiConfirmation} style={{ padding: '10px 24px', fontSize: 14, alignSelf: 'flex-start', opacity: needsAiConfirmation ? 0.55 : 1 }} onClick={handleRunBacktest}>
+            {needsAiConfirmation ? 'Confirm AI Rules Before Running' : '▶ Run Backtest'}
           </button>
         </div>
 
@@ -234,7 +310,7 @@ export default function StrategyLab({ onNavigate }: Props) {
                   <div key={i}>
                     {i > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, padding: '3px 0' }}>{joinType}</div>}
                     <div className="mono" style={{ fontSize: 11, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: 3, marginBottom: 3 }}>
-                      {c.indicator} {c.operator} {c.value}
+                      {describeConfig(c)} {c.operator} {c.valueIndicator ? describeConfig(c.valueIndicator) : c.value}
                     </div>
                   </div>
                 ))}
@@ -277,7 +353,7 @@ export default function StrategyLab({ onNavigate }: Props) {
                   <div key={i}>
                     {i > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, padding: '3px 0' }}>{exitJoin}</div>}
                     <div className="mono" style={{ fontSize: 11, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: 3, marginBottom: 3 }}>
-                      {c.indicator} {c.operator} {c.value}
+                      {describeConfig(c)} {c.operator} {c.valueIndicator ? describeConfig(c.valueIndicator) : c.value}
                     </div>
                   </div>
                 ))}

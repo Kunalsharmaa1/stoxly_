@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHistoricalCandles } from "@/lib/upstox";
+import { conditionsMet, validateConditions, type StrategyCondition } from "@/lib/backtest/indicators";
 
 const instrumentMap: Record<string, string> = {
   RELIANCE: "NSE_EQ|INE002A01018",
@@ -16,171 +17,6 @@ const instrumentMap: Record<string, string> = {
   BANKNIFTY: "NSE_INDEX|Nifty Bank",
   "BANK NIFTY": "NSE_INDEX|Nifty Bank",
 };
-
-interface Condition {
-  indicator: string;
-  operator: string;
-  value: string;
-}
-
-// Calculate RSI 14
-function calculateRSI(closes: number[], period = 14): (number | null)[] {
-  const rsi: (number | null)[] = new Array(closes.length).fill(null);
-  if (closes.length <= period) return rsi;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-
-  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-  rsi[period] = 100 - 100 / (1 + rs);
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      rsi[i] = 100;
-    } else {
-      const rsVal = avgGain / avgLoss;
-      rsi[i] = Number((100 - 100 / (1 + rsVal)).toFixed(2));
-    }
-  }
-
-  return rsi;
-}
-
-// Calculate EMA
-function calculateEMA(closes: number[], period = 20): (number | null)[] {
-  const ema: (number | null)[] = new Array(closes.length).fill(null);
-  if (closes.length < period) return ema;
-
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += closes[i];
-  }
-  let prevEma = sum / period;
-  ema[period - 1] = Number(prevEma.toFixed(2));
-
-  const k = 2 / (period + 1);
-  for (let i = period; i < closes.length; i++) {
-    const currentEma = closes[i] * k + prevEma * (1 - k);
-    ema[i] = Number(currentEma.toFixed(2));
-    prevEma = currentEma;
-  }
-
-  return ema;
-}
-
-// Calculate SMA
-function calculateSMA(closes: number[], period = 50): (number | null)[] {
-  const sma: (number | null)[] = new Array(closes.length).fill(null);
-  if (closes.length < period) return sma;
-
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += closes[i];
-  }
-  sma[period - 1] = Number((sum / period).toFixed(2));
-
-  for (let i = period; i < closes.length; i++) {
-    sum += closes[i] - closes[i - period];
-    sma[i] = Number((sum / period).toFixed(2));
-  }
-
-  return sma;
-}
-
-// Evaluate condition helper
-function evaluateCondition(
-  cond: Condition,
-  idx: number,
-  candles: any[],
-  rsi: (number | null)[],
-  ema20: (number | null)[],
-  sma50: (number | null)[]
-): boolean {
-  if (idx <= 0) return false;
-
-  const currentClose = candles[idx].close;
-  const prevClose = candles[idx - 1].close;
-
-  let leftValue: number | null = null;
-  if (cond.indicator === "RSI") leftValue = rsi[idx];
-  else if (cond.indicator === "Price") leftValue = currentClose;
-  else if (cond.indicator === "EMA 20") leftValue = ema20[idx];
-  else if (cond.indicator === "SMA 50") leftValue = sma50[idx];
-  else if (cond.indicator === "Volume") leftValue = candles[idx].volume;
-
-  if (leftValue === null) return false;
-
-  let rightValue: number | null = null;
-  if (cond.value === "EMA 20") rightValue = ema20[idx];
-  else if (cond.value === "SMA 50") rightValue = sma50[idx];
-  else if (cond.value === "Price") rightValue = currentClose;
-  else rightValue = Number(cond.value) || 0;
-
-  if (rightValue === null) return false;
-
-  switch (cond.operator) {
-    case "<":
-      return leftValue < rightValue;
-    case ">":
-      return leftValue > rightValue;
-    case "<=":
-      return leftValue <= rightValue;
-    case ">=":
-      return leftValue >= rightValue;
-    case "=":
-      return Math.abs(leftValue - rightValue) < 0.01;
-    case "crosses above": {
-      const prevLeft =
-        cond.indicator === "Price"
-          ? prevClose
-          : cond.indicator === "RSI"
-          ? rsi[idx - 1]
-          : null;
-      const prevRight =
-        cond.value === "EMA 20"
-          ? ema20[idx - 1]
-          : cond.value === "SMA 50"
-          ? sma50[idx - 1]
-          : Number(cond.value) || 0;
-      if (prevLeft === null || prevRight === null) return false;
-      return prevLeft <= prevRight && leftValue > rightValue;
-    }
-    case "crosses below": {
-      const prevLeft =
-        cond.indicator === "Price"
-          ? prevClose
-          : cond.indicator === "RSI"
-          ? rsi[idx - 1]
-          : null;
-      const prevRight =
-        cond.value === "EMA 20"
-          ? ema20[idx - 1]
-          : cond.value === "SMA 50"
-          ? sma50[idx - 1]
-          : Number(cond.value) || 0;
-      if (prevLeft === null || prevRight === null) return false;
-      return prevLeft >= prevRight && leftValue < rightValue;
-    }
-    default:
-      return false;
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -206,6 +42,16 @@ export async function POST(request: NextRequest) {
         { indicator: "RSI", operator: ">", value: "70" },
       ],
     } = body;
+
+    if (!["AND", "OR"].includes(joinType) || !["AND", "OR"].includes(exitJoin)) {
+      return NextResponse.json({ error: "Entry and exit joins must be AND or OR." }, { status: 400 });
+    }
+    try {
+      validateConditions(entryConditions, "Entry conditions");
+      validateConditions(exitConditions, "Exit conditions");
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid strategy conditions." }, { status: 400 });
+    }
 
     const instrumentKey =
       instrumentMap[symbol] ||
@@ -249,10 +95,7 @@ export async function POST(request: NextRequest) {
       }))
       .reverse();
 
-    const closes = candles.map((c) => c.close);
-    const rsi = calculateRSI(closes, 14);
-    const ema20 = calculateEMA(closes, 20);
-    const sma50 = calculateSMA(closes, 50);
+    const indicatorCache = new Map<string, (number | null)[]>();
 
     // Run Backtest Simulation
     let currentCapital = Number(capital) || 100000;
@@ -281,17 +124,7 @@ export async function POST(request: NextRequest) {
         // Check Entry Conditions
         let isEntrySignal = false;
 
-        if (entryConditions.length > 0) {
-          const results = entryConditions.map((c: Condition) =>
-            evaluateCondition(c, i, candles, rsi, ema20, sma50)
-          );
-
-          if (joinType === "AND") {
-            isEntrySignal = results.every(Boolean);
-          } else {
-            isEntrySignal = results.some(Boolean);
-          }
-        }
+        if (entryConditions.length > 0) isEntrySignal = conditionsMet(entryConditions as StrategyCondition[], joinType, i, candles, indicatorCache);
 
         if (isEntrySignal) {
           inPosition = true;
@@ -311,16 +144,7 @@ export async function POST(request: NextRequest) {
         const tpHit = candle.high >= tpPrice;
 
         let isExitSignal = false;
-        if (exitConditions.length > 0) {
-          const exitResults = exitConditions.map((c: Condition) =>
-            evaluateCondition(c, i, candles, rsi, ema20, sma50)
-          );
-          if (exitJoin === "AND") {
-            isExitSignal = exitResults.every(Boolean);
-          } else {
-            isExitSignal = exitResults.some(Boolean);
-          }
-        }
+        if (exitConditions.length > 0) isExitSignal = conditionsMet(exitConditions as StrategyCondition[], exitJoin, i, candles, indicatorCache);
 
         if (slHit || tpHit || isExitSignal || i === candles.length - 1) {
           let exitPrice = candle.close;
