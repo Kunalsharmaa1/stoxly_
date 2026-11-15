@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getHistoricalCandles } from "@/lib/upstox";
-import { conditionsMet, validateConditions, type StrategyCondition } from "@/lib/backtest/indicators";
+import { conditionsMet, normalizeConditions, type StrategyCondition } from "@/lib/backtest/indicators";
 
 const instrumentMap: Record<string, string> = {
   RELIANCE: "NSE_EQ|INE002A01018",
@@ -46,9 +46,11 @@ export async function POST(request: NextRequest) {
     if (!["AND", "OR"].includes(joinType) || !["AND", "OR"].includes(exitJoin)) {
       return NextResponse.json({ error: "Entry and exit joins must be AND or OR." }, { status: 400 });
     }
+    let normalizedEntryConditions: StrategyCondition[];
+    let normalizedExitConditions: StrategyCondition[];
     try {
-      validateConditions(entryConditions, "Entry conditions");
-      validateConditions(exitConditions, "Exit conditions");
+      normalizedEntryConditions = normalizeConditions(entryConditions, "Entry conditions");
+      normalizedExitConditions = normalizeConditions(exitConditions, "Exit conditions");
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid strategy conditions." }, { status: 400 });
     }
@@ -124,7 +126,7 @@ export async function POST(request: NextRequest) {
         // Check Entry Conditions
         let isEntrySignal = false;
 
-        if (entryConditions.length > 0) isEntrySignal = conditionsMet(entryConditions as StrategyCondition[], joinType, i, candles, indicatorCache);
+        if (normalizedEntryConditions.length > 0) isEntrySignal = conditionsMet(normalizedEntryConditions, joinType, i, candles, indicatorCache);
 
         if (isEntrySignal) {
           inPosition = true;
@@ -144,7 +146,7 @@ export async function POST(request: NextRequest) {
         const tpHit = candle.high >= tpPrice;
 
         let isExitSignal = false;
-        if (exitConditions.length > 0) isExitSignal = conditionsMet(exitConditions as StrategyCondition[], exitJoin, i, candles, indicatorCache);
+        if (normalizedExitConditions.length > 0) isExitSignal = conditionsMet(normalizedExitConditions, exitJoin, i, candles, indicatorCache);
 
         if (slHit || tpHit || isExitSignal || i === candles.length - 1) {
           let exitPrice = candle.close;

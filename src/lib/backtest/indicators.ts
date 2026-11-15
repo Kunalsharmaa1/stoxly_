@@ -3,7 +3,8 @@ export type IndicatorId =
   | "Price" | "Volume" | "RSI" | "EMA" | "SMA" | "VWAP" | "MACD"
   | "Bollinger Bands" | "ATR" | "ADX" | "Stochastic Oscillator" | "Supertrend"
   | "CCI" | "OBV" | "ROC" | "Williams %R" | "MFI" | "Parabolic SAR";
-export type IndicatorConfig = { indicator: IndicatorId | string; output?: string; params?: Record<string, number> };
+export type IndicatorConfig = { indicator: IndicatorId | string; output?: string; params?: Record<string, number>; [key: string]: unknown };
+export type NormalizedIndicatorConfig = { indicator: IndicatorId; output: string; params: Record<string, number> };
 export type StrategyCondition = IndicatorConfig & {
   operator: string;
   value: string;
@@ -15,34 +16,62 @@ export const INDICATORS: IndicatorId[] = [
   "Price", "Volume", "RSI", "EMA", "SMA", "VWAP", "MACD", "Bollinger Bands", "ATR", "ADX",
   "Stochastic Oscillator", "Supertrend", "CCI", "OBV", "ROC", "Williams %R", "MFI", "Parabolic SAR",
 ];
+export type ParameterRule = { kind: "integer" | "decimal"; min: number; max: number };
+type IndicatorDefinition = {
+  outputs: string[];
+  defaults: Record<string, number>;
+  parameters: Record<string, ParameterRule>;
+};
+const integerPeriod = { kind: "integer", min: 1, max: 500 } as const;
+const positiveDecimal = { kind: "decimal", min: Number.MIN_VALUE, max: 500 } as const;
+export const INDICATOR_DEFINITIONS: Record<IndicatorId, IndicatorDefinition> = {
+  Price: { outputs: ["Close", "Open", "High", "Low"], defaults: {}, parameters: {} },
+  Volume: { outputs: ["Volume"], defaults: {}, parameters: {} },
+  RSI: { outputs: ["Value"], defaults: { period: 14 }, parameters: { period: integerPeriod } },
+  EMA: { outputs: ["Value"], defaults: { period: 20 }, parameters: { period: integerPeriod } },
+  SMA: { outputs: ["Value"], defaults: { period: 50 }, parameters: { period: integerPeriod } },
+  VWAP: { outputs: ["Value"], defaults: {}, parameters: {} },
+  MACD: {
+    outputs: ["MACD Line", "Signal Line", "Histogram"],
+    defaults: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+    parameters: { fastPeriod: integerPeriod, slowPeriod: integerPeriod, signalPeriod: integerPeriod },
+  },
+  "Bollinger Bands": {
+    outputs: ["Upper Band", "Middle Band", "Lower Band"],
+    defaults: { period: 20, standardDeviations: 2 },
+    parameters: { period: integerPeriod, standardDeviations: { kind: "decimal", min: 0.001, max: 10 } },
+  },
+  ATR: { outputs: ["Value"], defaults: { period: 14 }, parameters: { period: integerPeriod } },
+  ADX: { outputs: ["ADX", "+DI", "-DI"], defaults: { period: 14 }, parameters: { period: integerPeriod } },
+  "Stochastic Oscillator": {
+    outputs: ["%K", "%D"], defaults: { kPeriod: 14, dPeriod: 3 },
+    parameters: { kPeriod: integerPeriod, dPeriod: integerPeriod },
+  },
+  Supertrend: {
+    outputs: ["Value", "Direction"], defaults: { atrPeriod: 10, multiplier: 3 },
+    parameters: { atrPeriod: integerPeriod, multiplier: positiveDecimal },
+  },
+  CCI: { outputs: ["Value"], defaults: { period: 20 }, parameters: { period: integerPeriod } },
+  OBV: { outputs: ["Value"], defaults: {}, parameters: {} },
+  ROC: { outputs: ["Value"], defaults: { period: 12 }, parameters: { period: integerPeriod } },
+  "Williams %R": { outputs: ["Value"], defaults: { period: 14 }, parameters: { period: integerPeriod } },
+  MFI: { outputs: ["Value"], defaults: { period: 14 }, parameters: { period: integerPeriod } },
+  "Parabolic SAR": {
+    outputs: ["Value"], defaults: { step: 0.02, maxStep: 0.2 },
+    parameters: { step: { kind: "decimal", min: 0.001, max: 1 }, maxStep: { kind: "decimal", min: 0.001, max: 1 } },
+  },
+};
+export const INDICATOR_PARAMETER_KEYS = [...new Set(INDICATORS.flatMap(indicator => Object.keys(INDICATOR_DEFINITIONS[indicator].parameters)))];
 
-const defaults: Record<IndicatorId, Record<string, number>> = {
-  Price: {}, Volume: {}, RSI: { period: 14 }, EMA: { period: 20 }, SMA: { period: 50 }, VWAP: {},
-  MACD: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-  "Bollinger Bands": { period: 20, standardDeviations: 2 }, ATR: { period: 14 }, ADX: { period: 14 },
-  "Stochastic Oscillator": { kPeriod: 14, dPeriod: 3 }, Supertrend: { atrPeriod: 10, multiplier: 3 },
-  CCI: { period: 20 }, OBV: {}, ROC: { period: 12 }, "Williams %R": { period: 14 }, MFI: { period: 14 },
-  "Parabolic SAR": { step: 0.02, maxStep: 0.2 },
-};
-const outputs: Record<IndicatorId, string[]> = {
-  Price: ["Close", "Open", "High", "Low"], Volume: ["Volume"], RSI: ["Value"], EMA: ["Value"], SMA: ["Value"],
-  VWAP: ["Value"], MACD: ["MACD Line", "Signal Line", "Histogram"],
-  "Bollinger Bands": ["Upper Band", "Middle Band", "Lower Band"], ATR: ["Value"], ADX: ["ADX", "+DI", "-DI"],
-  "Stochastic Oscillator": ["%K", "%D"], Supertrend: ["Value", "Direction"], CCI: ["Value"], OBV: ["Value"],
-  ROC: ["Value"], "Williams %R": ["Value"], MFI: ["Value"], "Parabolic SAR": ["Value"],
-};
-const validParams: Record<IndicatorId, string[]> = {
-  Price: [], Volume: [], RSI: ["period"], EMA: ["period"], SMA: ["period"], VWAP: [],
-  MACD: ["fastPeriod", "slowPeriod", "signalPeriod"], "Bollinger Bands": ["period", "standardDeviations"],
-  ATR: ["period"], ADX: ["period"], "Stochastic Oscillator": ["kPeriod", "dPeriod"],
-  Supertrend: ["atrPeriod", "multiplier"], CCI: ["period"], OBV: [], ROC: ["period"],
-  "Williams %R": ["period"], MFI: ["period"], "Parabolic SAR": ["step", "maxStep"],
-};
 export function getIndicatorOutputs(indicator: string): string[] {
   const legacy = /^(EMA|SMA)\s+\d+$/i.exec(indicator);
   const id = legacy ? legacy[1].toUpperCase() : indicator === "Stochastic" ? "Stochastic Oscillator" : indicator;
   if (!INDICATORS.includes(id as IndicatorId)) return [];
-  return outputs[id as IndicatorId];
+  return INDICATOR_DEFINITIONS[id as IndicatorId].outputs;
+}
+export function getIndicatorParameterRules(indicator: string): Record<string, ParameterRule> {
+  const normalized = normalizeIndicatorConfig({ indicator });
+  return INDICATOR_DEFINITIONS[normalized.indicator].parameters;
 }
 export function getDefaultIndicatorConfig(indicator: string): IndicatorConfig {
   const normalized = normalizeIndicatorConfig({ indicator });
@@ -120,21 +149,38 @@ function rsi(c: Candle[], period: number): (number | null)[] {
 }
 function atr(c: Candle[], period: number): (number | null)[] { return wilder(trueRanges(c), period); }
 
-export function normalizeIndicatorConfig(config: IndicatorConfig): IndicatorConfig {
-  const legacy = /^(EMA|SMA)\s+(\d+)$/i.exec(config.indicator);
-  if (legacy) return { indicator: legacy[1].toUpperCase(), output: "Value", params: { period: Number(legacy[2]) } };
-  const indicator = config.indicator === "Stochastic" ? "Stochastic Oscillator" : config.indicator;
-  if (!INDICATORS.includes(indicator as IndicatorId)) throw new Error(`Unsupported indicator: ${config.indicator}`);
+export function normalizeIndicatorConfig(config: IndicatorConfig | unknown): NormalizedIndicatorConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid indicator configuration.");
+  const raw = config as Record<string, unknown>;
+  if (typeof raw.indicator !== "string") throw new Error("Invalid indicator configuration.");
+  const legacy = /^(EMA|SMA)\s+(\d+)$/i.exec(raw.indicator);
+  const indicator = legacy ? legacy[1].toUpperCase() : raw.indicator === "Stochastic" ? "Stochastic Oscillator" : raw.indicator;
+  if (!INDICATORS.includes(indicator as IndicatorId)) throw new Error(`Unsupported indicator: ${raw.indicator}`);
   const id = indicator as IndicatorId;
-  const params = { ...defaults[id], ...(config.params || {}) };
-  if (Object.keys(config.params || {}).some(key => !validParams[id].includes(key))) throw new Error(`Unsupported ${id} parameter.`);
-  for (const [key, value] of Object.entries(params)) {
-    if (!Number.isFinite(value) || (key === "step" || key === "maxStep" || key === "multiplier" || key === "standardDeviations" ? value <= 0 : !Number.isInteger(value) || value < 1 || value > 500)) throw new Error(`Invalid ${id} parameter: ${key}.`);
+  const definition = INDICATOR_DEFINITIONS[id];
+  const nested = raw.params !== undefined ? raw.params : raw.parameters;
+  if (nested !== undefined && (!nested || typeof nested !== "object" || Array.isArray(nested))) throw new Error(`Invalid ${id} parameters.`);
+  const supplied: Record<string, unknown> = { ...((nested || {}) as Record<string, unknown>) };
+  if (raw.params !== undefined && raw.parameters !== undefined) throw new Error(`Duplicate ${id} parameter objects.`);
+  if (legacy && supplied.period === undefined) supplied.period = Number(legacy[2]);
+  const misplaced = Object.keys(raw).filter(key => key in definition.parameters);
+  for (const key of misplaced) {
+    if (Object.prototype.hasOwnProperty.call(supplied, key)) throw new Error(`Duplicate ${id} parameter: ${key}.`);
+    supplied[key] = raw[key];
+  }
+  if (Object.keys(supplied).some(key => !(key in definition.parameters))) throw new Error(`Unsupported ${id} parameter.`);
+  const params: Record<string, number> = {};
+  for (const [key, rule] of Object.entries(definition.parameters)) {
+    const candidate = supplied[key] === undefined ? definition.defaults[key] : supplied[key];
+    const value = typeof candidate === "number" ? candidate : typeof candidate === "string" && candidate.trim() ? Number(candidate) : NaN;
+    if (!Number.isFinite(value) || value < rule.min || value > rule.max || (rule.kind === "integer" && !Number.isInteger(value))) throw new Error(`Invalid ${id} parameter: ${key}.`);
+    params[key] = value;
   }
   if (id === "MACD" && params.fastPeriod >= params.slowPeriod) throw new Error("MACD fast period must be less than its slow period.");
   if (id === "Parabolic SAR" && (params.step > params.maxStep || params.maxStep > 1)) throw new Error("Parabolic SAR step must not exceed max step, which must be at most 1.");
-  if (!outputs[id].includes(config.output || outputs[id][0])) throw new Error(`Unsupported ${id} output line.`);
-  return { indicator: id, output: config.output || outputs[id][0], params };
+  const output = typeof raw.output === "string" && raw.output ? raw.output : definition.outputs[0];
+  if (!definition.outputs.includes(output)) throw new Error(`Unsupported ${id} output line.`);
+  return { indicator: id, output, params };
 }
 
 export function calculateIndicator(candles: Candle[], rawConfig: IndicatorConfig): (number | null)[] {
@@ -276,15 +322,31 @@ export function calculateIndicator(candles: Candle[], rawConfig: IndicatorConfig
   return lines[config.output!];
 }
 
-export function validateConditions(conditions: unknown, label: string): asserts conditions is StrategyCondition[] {
+export function normalizeConditions(conditions: unknown, label: string): StrategyCondition[] {
   if (!Array.isArray(conditions) || conditions.length < 1 || conditions.length > 25) throw new Error(`${label} must contain between 1 and 25 conditions.`);
+  const normalized: StrategyCondition[] = [];
   for (const condition of conditions) {
     if (!condition || typeof condition !== "object" || typeof condition.indicator !== "string" || typeof condition.value !== "string" || !OPERATORS.includes(condition.operator)) throw new Error(`${label} contains an invalid operator or condition.`);
-    normalizeIndicatorConfig(condition);
-    if (condition.valueIndicator) normalizeIndicatorConfig(condition.valueIndicator);
-    else if (!condition.value.trim() || (condition.value !== "Price" && !/^(EMA|SMA)\s+\d+$/i.test(condition.value) && !Number.isFinite(Number(condition.value)))) throw new Error(`${label} comparisons must use a supported series or a numeric value.`);
-    if (condition.valueIndicator && condition.value?.trim()) throw new Error(`${label} condition cannot set both a comparison indicator and a numeric value.`);
+    const left = normalizeIndicatorConfig(condition);
+    let value = condition.value.trim();
+    let valueIndicator: NormalizedIndicatorConfig | undefined;
+    if (condition.valueIndicator) {
+      if (value) throw new Error(`${label} condition cannot set both a comparison indicator and a numeric value.`);
+      valueIndicator = normalizeIndicatorConfig(condition.valueIndicator);
+    } else if (value === "Price" || /^(EMA|SMA)\s+\d+$/i.test(value)) {
+      valueIndicator = normalizeIndicatorConfig({ indicator: value });
+      value = "";
+    } else {
+      if (!value || !Number.isFinite(Number(value))) throw new Error(`${label} comparisons must use a supported series or a numeric value.`);
+      value = String(Number(value));
+    }
+    normalized.push({ ...left, operator: condition.operator, value, ...(valueIndicator ? { valueIndicator } : {}) });
   }
+  return normalized;
+}
+
+export function validateConditions(conditions: unknown, label: string): asserts conditions is StrategyCondition[] {
+  normalizeConditions(conditions, label);
 }
 
 function getComparisonConfig(condition: StrategyCondition): IndicatorConfig | null {

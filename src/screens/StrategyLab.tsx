@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Screen } from '@/types'
-import { getDefaultIndicatorConfig, getIndicatorOutputs, INDICATORS, normalizeIndicatorConfig, type IndicatorConfig, type StrategyCondition } from '@/lib/backtest/indicators'
+import { getDefaultIndicatorConfig, getIndicatorOutputs, getIndicatorParameterRules, INDICATORS, normalizeIndicatorConfig, type IndicatorConfig, type StrategyCondition } from '@/lib/backtest/indicators'
 
 type Condition = StrategyCondition
 
@@ -17,6 +17,17 @@ function describeConfig(config: IndicatorConfig): string {
   const normalized = safeConfig(config)
   const params = Object.entries(normalized.params || {}).map(([key, value]) => `${key}=${value}`).join(', ')
   return `${normalized.indicator}${normalized.output && normalized.output !== 'Value' ? ` ${normalized.output}` : ''}${params ? ` (${params})` : ''}`
+}
+
+function IndicatorParameterInput({ label, name, value, rule, onCommit }: { label: string; name: string; value: number; rule: { kind: 'integer' | 'decimal'; min: number; max: number }; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => setDraft(String(value)), [value])
+  const commit = () => {
+    const parsed = draft.trim() ? Number(draft) : NaN
+    if (Number.isFinite(parsed) && parsed >= rule.min && parsed <= rule.max && (rule.kind !== 'integer' || Number.isInteger(parsed))) onCommit(parsed)
+    else setDraft(String(value))
+  }
+  return <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>{name}<input aria-label={`${label} ${name}`} type="number" min={rule.min} max={rule.max} step={rule.kind === 'integer' ? 1 : 'any'} value={draft} onChange={e => setDraft(e.target.value)} onBlur={commit} style={{ width: 66 }} /></label>
 }
 
 const ConditionRow = ({ cond, onChange, onRemove, join }: {
@@ -38,7 +49,7 @@ const ConditionRow = ({ cond, onChange, onRemove, join }: {
       {getIndicatorOutputs(id).length > 1 && <select aria-label={`${label} output line`} value={normalized.output} onChange={e => update({ ...normalized, output: e.target.value })} style={{ flex: '1 1 110px' }}>
         {getIndicatorOutputs(id).map(output => <option key={output}>{output}</option>)}
       </select>}
-      {Object.entries(normalized.params || {}).map(([key, value]) => <label key={key} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>{key}<input aria-label={`${label} ${key}`} type="number" min="0.001" max="500" value={value} onChange={e => update({ ...normalized, params: { ...normalized.params, [key]: Number(e.target.value) } })} style={{ width: 66 }} /></label>)}
+      {Object.entries(normalized.params || {}).map(([key, value]) => <IndicatorParameterInput key={key} label={label} name={key} value={value} rule={getIndicatorParameterRules(id)[key]} onCommit={next => update({ ...normalized, params: { ...normalized.params, [key]: next } })} />)}
     </>
   }
   return (

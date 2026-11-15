@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { Screen } from '@/types'
+import BrandLogo from '@/components/BrandLogo'
 
 interface Props { onNavigate: (s: Screen) => void }
 
@@ -26,9 +27,8 @@ export default function Login({ onNavigate }: Props) {
 
       {/* Left: branding */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '60px 80px', position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 40 }}>
-          <div style={{ width: 36, height: 36, background: 'var(--green)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: '#000' }}>S</div>
-          <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Stoxly</span>
+        <div style={{ marginBottom: 40 }}>
+          <BrandLogo iconSize={36} wordmarkSize={22} gap={10} />
         </div>
         <h1 style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.15, color: 'var(--text-primary)', maxWidth: 480 }}>
           Quantitative research. AI-powered intelligence.

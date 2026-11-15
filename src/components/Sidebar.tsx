@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import type { Screen } from '@/types'
 import { screenToPath } from '@/lib/navigation'
+import BrandLogo from '@/components/BrandLogo'
 
 const NavItem = ({ label, screen, current, icon }: {
   label: string; screen: Screen; current: Screen; icon: string
@@ -50,16 +51,7 @@ export default function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{ padding: '20px 16px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 28, height: 28, background: 'var(--green)', borderRadius: 6,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 14, fontWeight: 800, color: '#000',
-          }}>S</div>
-          <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-            Stoxly
-          </span>
-        </div>
+        <BrandLogo iconSize={28} wordmarkSize={16} gap={8} />
       </div>
 
       {/* Nav */}

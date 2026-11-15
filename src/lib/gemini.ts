@@ -1,4 +1,4 @@
-import { INDICATORS, OPERATORS, normalizeIndicatorConfig, validateConditions, type IndicatorConfig, type StrategyCondition } from "@/lib/backtest/indicators";
+import { INDICATORS, INDICATOR_PARAMETER_KEYS, OPERATORS, normalizeConditions, type StrategyCondition } from "./backtest/indicators.ts";
 
 const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -15,11 +15,7 @@ export type StrategyDraft = {
 };
 
 const supportedSymbols = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN", "HAL", "WIPRO", "ICICIBANK", "NIFTY50", "SENSEX", "BANKNIFTY"];
-const parameterSchema = { type: "OBJECT", properties: {
-  period: { type: "NUMBER" }, fastPeriod: { type: "NUMBER" }, slowPeriod: { type: "NUMBER" }, signalPeriod: { type: "NUMBER" },
-  standardDeviations: { type: "NUMBER" }, kPeriod: { type: "NUMBER" }, dPeriod: { type: "NUMBER" }, atrPeriod: { type: "NUMBER" },
-  multiplier: { type: "NUMBER" }, step: { type: "NUMBER" }, maxStep: { type: "NUMBER" },
-} };
+const parameterSchema = { type: "OBJECT", properties: Object.fromEntries(INDICATOR_PARAMETER_KEYS.map(key => [key, { type: "NUMBER" }])) };
 const indicatorConfigSchema = { type: "OBJECT", properties: {
   indicator: { type: "STRING", enum: INDICATORS }, output: { type: "STRING" }, params: parameterSchema,
 }, required: ["indicator"] };
@@ -43,7 +39,7 @@ const responseSchema = {
   required: ["status", "clarification", "name", "symbol", "joinType", "exitJoin", "entryConditions", "exitConditions"],
 };
 
-function validateDraft(value: unknown): StrategyDraft {
+export function validateStrategyDraft(value: unknown): StrategyDraft {
   const draft = value as StrategyDraft;
   if (!draft || !["ready", "clarification"].includes(draft.status)) throw new Error("Gemini returned an invalid strategy response.");
   if (draft.status === "clarification") {
@@ -54,9 +50,8 @@ function validateDraft(value: unknown): StrategyDraft {
     throw new Error("The strategy contains a rule the backtest engine does not support.");
   }
   try {
-    validateConditions(draft.entryConditions, "Entry conditions");
-    validateConditions(draft.exitConditions, "Exit conditions");
-    draft.entryConditions.forEach(condition => normalizeIndicatorConfig(condition));
+    draft.entryConditions = normalizeConditions(draft.entryConditions, "Entry conditions");
+    draft.exitConditions = normalizeConditions(draft.exitConditions, "Exit conditions");
   } catch { throw new Error("The strategy contains an unsupported indicator, output, parameter, operator, or comparison."); }
   return draft;
 }
@@ -84,7 +79,7 @@ export async function generateStrategy(prompt: string, selectedSymbol: string): 
   const payload = await response.json();
   const text = payload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || "").join("");
   if (!text) throw new Error("Gemini returned an empty response. Please revise the strategy request.");
-  try { return validateDraft(JSON.parse(text)); }
+  try { return validateStrategyDraft(JSON.parse(text)); }
   catch (error) {
     if (error instanceof SyntaxError) throw new Error("Gemini returned an unreadable strategy. Please try a more specific request.");
     throw error;

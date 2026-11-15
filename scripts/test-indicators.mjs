@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { calculateIndicator, conditionsMet, validateConditions } from '../src/lib/backtest/indicators.ts'
+import { calculateIndicator, conditionsMet, getDefaultIndicatorConfig, normalizeConditions, normalizeIndicatorConfig, validateConditions, INDICATORS } from '../src/lib/backtest/indicators.ts'
+import { validateStrategyDraft } from '../src/lib/gemini.ts'
 
 function candlesFrom(closes) {
   return closes.map((close, index) => ({
@@ -126,6 +127,88 @@ test('rejects invalid periods, output names, and unsupported operators', () => {
   assert.throws(() => calculateIndicator(candles, { indicator: 'RSI', params: { period: 0 } }))
   assert.throws(() => calculateIndicator(candles, { indicator: 'MACD', output: 'Unknown' }))
   assert.throws(() => validateConditions([{ indicator: 'Price', operator: 'contains', value: '1' }], 'Entry conditions'))
+})
+
+test('provides canonical defaults for every supported indicator and merges custom values', () => {
+  const defaults = {
+    Price: {}, Volume: {}, RSI: { period: 14 }, EMA: { period: 20 }, SMA: { period: 50 }, VWAP: {},
+    MACD: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, 'Bollinger Bands': { period: 20, standardDeviations: 2 },
+    ATR: { period: 14 }, ADX: { period: 14 }, 'Stochastic Oscillator': { kPeriod: 14, dPeriod: 3 },
+    Supertrend: { atrPeriod: 10, multiplier: 3 }, CCI: { period: 20 }, OBV: {}, ROC: { period: 12 },
+    'Williams %R': { period: 14 }, MFI: { period: 14 }, 'Parabolic SAR': { step: 0.02, maxStep: 0.2 },
+  }
+  assert.deepEqual([...INDICATORS].sort(), Object.keys(defaults).sort())
+  for (const [indicator, params] of Object.entries(defaults)) assert.deepEqual(getDefaultIndicatorConfig(indicator).params, params, indicator)
+  assert.deepEqual(normalizeIndicatorConfig({ indicator: 'RSI', params: { period: '21' } }).params, { period: 21 })
+  assert.deepEqual(normalizeIndicatorConfig({ indicator: 'RSI', params: { period: undefined } }).params, { period: 14 })
+  assert.deepEqual(normalizeIndicatorConfig({ indicator: 'MACD', params: { fastPeriod: 8 } }).params, { fastPeriod: 8, slowPeriod: 26, signalPeriod: 9 })
+  assert.deepEqual(normalizeIndicatorConfig(JSON.parse(JSON.stringify({ indicator: 'Bollinger Bands', params: { period: '30' } }))).params, { period: 30, standardDeviations: 2 })
+  assert.deepEqual(normalizeIndicatorConfig({ indicator: 'EMA 20' }).params, { period: 20 })
+  assert.deepEqual(normalizeIndicatorConfig({ indicator: 'SMA 50' }).params, { period: 50 })
+})
+
+test('rejects invalid, non-finite, out-of-range and indicator-incompatible parameters', () => {
+  for (const period of [0, -1, 1.5, NaN, Infinity, -Infinity, null, '', '  ']) {
+    assert.throws(() => normalizeIndicatorConfig({ indicator: 'RSI', params: { period } }), `period=${String(period)}`)
+  }
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'RSI', params: { period: 501 } }))
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'RSI', params: { unknown: 4 } }))
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'Price', params: { period: 14 } }))
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'MACD', params: { fastPeriod: 26, slowPeriod: 12 } }))
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'Parabolic SAR', params: { step: 0.3 } }))
+  assert.throws(() => normalizeIndicatorConfig({ indicator: 'RSI', output: 'Histogram' }))
+})
+
+test('executes custom parameter configurations for every parameterized indicator', () => {
+  const customCases = [
+    ['RSI', { period: 8 }], ['EMA', { period: 5 }], ['SMA', { period: 5 }],
+    ['MACD', { fastPeriod: 5, slowPeriod: 10, signalPeriod: 4 }],
+    ['Bollinger Bands', { period: 10, standardDeviations: 1.5 }], ['ATR', { period: 8 }], ['ADX', { period: 8 }],
+    ['Stochastic Oscillator', { kPeriod: 8, dPeriod: 2 }], ['Supertrend', { atrPeriod: 5, multiplier: 2 }],
+    ['CCI', { period: 8 }], ['ROC', { period: 5 }], ['Williams %R', { period: 5 }], ['MFI', { period: 8 }],
+    ['Parabolic SAR', { step: 0.03, maxStep: 0.15 }],
+  ]
+  for (const [indicator, params] of customCases) {
+    const config = normalizeIndicatorConfig({ indicator, params })
+    assert.deepEqual(config.params, params, indicator)
+    const values = calculateIndicator(candles, config)
+    assert.equal(values.length, candles.length, indicator)
+    assert.ok(values.some(Number.isFinite), indicator)
+  }
+})
+
+test('normalizes condition shapes and validates entry/exit numeric and series comparisons', () => {
+  const cases = [
+    { indicator: 'RSI', operator: '>', value: '50' },
+    { indicator: 'RSI', operator: 'crosses above', value: '30' },
+    { indicator: 'Price', operator: 'crosses above', value: '', valueIndicator: { indicator: 'EMA', params: { period: '20' } } },
+    { indicator: 'EMA', params: { period: 20 }, operator: 'crosses above', value: '', valueIndicator: { indicator: 'SMA', params: { period: 50 } } },
+    { indicator: 'MACD', output: 'MACD Line', operator: 'crosses above', value: '', valueIndicator: { indicator: 'MACD', output: 'Signal Line' } },
+    { indicator: 'Price', operator: '>', value: '', valueIndicator: { indicator: 'Bollinger Bands', output: 'Upper Band' } },
+    { indicator: 'ADX', operator: '>', value: '25' },
+    { indicator: 'Stochastic Oscillator', output: '%K', operator: 'crosses above', value: '', valueIndicator: { indicator: 'Stochastic Oscillator', output: '%D' } },
+    { indicator: 'Volume', operator: '>', value: '10000' },
+  ]
+  for (const label of ['Entry', 'Exit']) {
+    const normalized = normalizeConditions(cases, label)
+    assert.equal(normalized.length, cases.length)
+    assert.deepEqual(normalized[2].valueIndicator.params, { period: 20 })
+    assert.deepEqual(normalized[3].valueIndicator.params, { period: 50 })
+  }
+  assert.throws(() => normalizeConditions([{ indicator: 'MACD', operator: '>', value: '1', params: { period: 2 } }], 'Entry'))
+  const saved = JSON.parse(JSON.stringify(cases))
+  assert.equal(normalizeConditions(saved, 'Entry').length, cases.length)
+})
+
+test('canonicalizes valid Gemini strategies and rejects unsupported generated rules', () => {
+  const valid = validateStrategyDraft({
+    status: 'ready', clarification: '', name: 'Momentum', symbol: 'RELIANCE', joinType: 'AND', exitJoin: 'OR',
+    entryConditions: [{ indicator: 'RSI', operator: '>', value: '50' }],
+    exitConditions: [{ indicator: 'MACD', output: 'MACD Line', operator: 'crosses below', value: '', valueIndicator: { indicator: 'MACD', output: 'Signal Line' } }],
+  })
+  assert.deepEqual(valid.entryConditions[0].params, { period: 14 })
+  assert.deepEqual(valid.exitConditions[0].valueIndicator.params, { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 })
+  assert.throws(() => validateStrategyDraft({ ...valid, entryConditions: [{ indicator: 'RSI', operator: '>', value: '50', params: { period: 0 } }] }))
 })
 
 test('indicator outputs at an index are unchanged when later candles are added', () => {
